@@ -85,65 +85,45 @@ namespace ProjectEdenUnofficialSetup
         private static string Canonical(string path)
         {
             if (String.IsNullOrWhiteSpace(path))
-                throw new ArgumentException("Choose a source and destination folder.");
+                throw new ArgumentException("Choose the GOG Project Eden folder.");
             return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar,
                 Path.AltDirectorySeparatorChar);
         }
 
-        private static void CopyTree(string source, string target)
+        public static void Install(string gameFolder, Action<string> progress)
         {
-            if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0)
-                throw new IOException("Linked source folders are not supported: " + source);
-            Directory.CreateDirectory(target);
-            foreach (string file in Directory.GetFiles(source))
-            {
-                string name = Path.GetFileName(file);
-                if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0)
-                    throw new IOException("Linked source files are not supported: " + file);
-                File.Copy(file, Path.Combine(target, name));
-            }
-            foreach (string directory in Directory.GetDirectories(source))
-                CopyTree(directory, Path.Combine(target, Path.GetFileName(directory)));
-        }
-
-        public static void Install(string sourceFolder, string targetFolder,
-            bool copySaves, Action<string> progress)
-        {
-            string source = Canonical(sourceFolder);
-            string target = Canonical(targetFolder);
-            if (!Directory.Exists(source)) throw new DirectoryNotFoundException(source);
-            string sourceWithSlash = source + Path.DirectorySeparatorChar;
-            string targetWithSlash = target + Path.DirectorySeparatorChar;
-            if (String.Equals(source, target, StringComparison.OrdinalIgnoreCase) ||
-                target.StartsWith(sourceWithSlash, StringComparison.OrdinalIgnoreCase) ||
-                source.StartsWith(targetWithSlash, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException(
-                    "The destination must be separate from the GOG game folder.");
-            if (Directory.Exists(target) && Directory.GetFileSystemEntries(target).Length != 0)
-                throw new InvalidOperationException("Choose an empty destination folder.");
-
-            string executable = Path.Combine(source, "Eden.exe");
+            string folder = Canonical(gameFolder);
+            if (!Directory.Exists(folder)) throw new DirectoryNotFoundException(folder);
+            string executable = Path.Combine(folder, "Eden.exe");
+            string backup = Path.Combine(folder, "Eden.exe.original");
             if (!File.Exists(executable))
                 throw new FileNotFoundException("Eden.exe was not found in the GOG folder.");
-            string[] directories = { "Images", "Levels", "Movies", "Sounds" };
-            string[] files = { "d3d8.dll", "title.edf" };
-            foreach (string name in directories)
-                if (!Directory.Exists(Path.Combine(source, name)))
-                    throw new DirectoryNotFoundException("Missing game folder: " + name);
-            foreach (string name in files)
-                if (!File.Exists(Path.Combine(source, name)))
-                    throw new FileNotFoundException("Missing game file: " + name);
 
             progress("Verifying the GOG executable...");
             PatchManifest manifest = PatchManifest.Load();
             byte[] original = File.ReadAllBytes(executable);
-            byte[] game = new byte[manifest.OutputLength];
+            byte[] game;
             using (SHA256 hash = SHA256.Create())
             {
+                if (original.Length == manifest.OutputLength &&
+                    Equal(hash.ComputeHash(original), manifest.OutputHash))
+                {
+                    if (!File.Exists(backup) ||
+                        !Equal(hash.ComputeHash(File.ReadAllBytes(backup)), manifest.SourceHash))
+                        throw new InvalidDataException(
+                            "Eden.exe is already patched, but its original backup is missing or invalid.");
+                    progress("The patch is already installed.");
+                    return;
+                }
                 if (original.Length != manifest.SourceLength ||
                     !Equal(hash.ComputeHash(original), manifest.SourceHash))
                     throw new InvalidDataException(
                         "This setup supports only the verified GOG Eden.exe version 1.0.0.2.");
+                if (File.Exists(backup) &&
+                    !Equal(hash.ComputeHash(File.ReadAllBytes(backup)), manifest.SourceHash))
+                    throw new InvalidDataException(
+                        "Eden.exe.original already exists and is not the verified GOG executable.");
+                game = new byte[manifest.OutputLength];
                 Buffer.BlockCopy(original, 0, game, 0, original.Length);
                 foreach (Change change in manifest.Changes)
                 {
@@ -158,27 +138,18 @@ namespace ProjectEdenUnofficialSetup
                     throw new InvalidDataException("The patched executable failed verification.");
             }
 
-            Directory.CreateDirectory(target);
-            foreach (string name in directories)
+            progress("Backing up and patching Eden.exe...");
+            string staged = Path.Combine(folder,
+                "Eden.exe.patch-" + Guid.NewGuid().ToString("N") + ".tmp");
+            try
             {
-                progress("Copying " + name + "...");
-                CopyTree(Path.Combine(source, name), Path.Combine(target, name));
+                File.WriteAllBytes(staged, game);
+                File.Replace(staged, executable, File.Exists(backup) ? null : backup);
             }
-            foreach (string name in files)
+            finally
             {
-                progress("Copying " + name + "...");
-                File.Copy(Path.Combine(source, name), Path.Combine(target, name));
+                if (File.Exists(staged)) File.Delete(staged);
             }
-            if (copySaves && Directory.Exists(Path.Combine(source, "SAVED GAMES")))
-            {
-                progress("Copying saved games...");
-                CopyTree(Path.Combine(source, "SAVED GAMES"),
-                    Path.Combine(target, "SAVED GAMES"));
-            }
-            else Directory.CreateDirectory(Path.Combine(target, "SAVED GAMES"));
-            Directory.CreateDirectory(Path.Combine(target, "ScreenShots"));
-            progress("Writing the patched executable...");
-            File.WriteAllBytes(Path.Combine(target, "Eden.exe"), game);
             progress("Installation complete.");
         }
     }
@@ -186,8 +157,6 @@ namespace ProjectEdenUnofficialSetup
     internal sealed class SetupWindow : Form
     {
         private readonly TextBox source = new TextBox();
-        private readonly TextBox target = new TextBox();
-        private readonly CheckBox saves = new CheckBox();
         private readonly Button install = new Button();
         private readonly Label status = new Label();
         private readonly ProgressBar progress = new ProgressBar();
@@ -196,7 +165,7 @@ namespace ProjectEdenUnofficialSetup
         public SetupWindow()
         {
             Text = "Project Eden Unofficial Patch Setup";
-            ClientSize = new Size(650, 285);
+            ClientSize = new Size(650, 185);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
@@ -208,34 +177,21 @@ namespace ProjectEdenUnofficialSetup
             Button sourceBrowse = new Button();
             sourceBrowse.Text = "Browse...";
             sourceBrowse.SetBounds(545, 41, 85, 26);
-            sourceBrowse.Click += delegate { Browse(source, false); };
+            sourceBrowse.Click += delegate { Browse(source); };
 
-            Label targetLabel = new Label();
-            targetLabel.Text = "New patched game folder (must be empty)";
-            targetLabel.SetBounds(20, 85, 550, 20);
-            target.SetBounds(20, 109, 515, 24);
-            Button targetBrowse = new Button();
-            targetBrowse.Text = "Browse...";
-            targetBrowse.SetBounds(545, 108, 85, 26);
-            targetBrowse.Click += delegate { Browse(target, true); };
-
-            saves.Text = "Copy saved games from the GOG installation";
-            saves.SetBounds(20, 149, 500, 25);
             install.Text = "Install";
-            install.SetBounds(530, 183, 100, 30);
+            install.SetBounds(530, 82, 100, 30);
             install.Click += BeginInstall;
-            progress.SetBounds(20, 227, 610, 16);
-            status.Text = "Choose folders to create a separate patched installation.";
-            status.SetBounds(20, 252, 610, 22);
+            progress.SetBounds(20, 125, 610, 16);
+            status.Text = "The original Eden.exe will be backed up in the selected folder.";
+            status.SetBounds(20, 150, 610, 22);
 
             Controls.AddRange(new Control[] { sourceLabel, source, sourceBrowse,
-                targetLabel, target, targetBrowse, saves, install,
-                progress, status });
+                install, progress, status });
             worker.WorkerReportsProgress = true;
             worker.DoWork += delegate(object sender, DoWorkEventArgs e)
             {
-                string[] paths = (string[])e.Argument;
-                Installer.Install(paths[0], paths[1], paths[2] == "1",
+                Installer.Install((string)e.Argument,
                     delegate(string message) { worker.ReportProgress(0, message); });
             };
             worker.ProgressChanged += delegate(object sender, ProgressChangedEventArgs e)
@@ -248,24 +204,24 @@ namespace ProjectEdenUnofficialSetup
                 install.Enabled = true;
                 if (e.Error != null)
                 {
-                    status.Text = "Installation stopped. The destination may contain partial files.";
+                    status.Text = "Installation stopped. See the error for details.";
                     MessageBox.Show(this, e.Error.Message, "Setup failed",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 else
                 {
-                    status.Text = "Installation complete. Launch Eden.exe from the new folder.";
-                    MessageBox.Show(this, "The separate patched game is ready.",
+                    status.Text = "Installation complete. Launch Eden.exe from the GOG folder.";
+                    MessageBox.Show(this, "Project Eden is patched in its GOG folder.",
                         "Setup complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             };
         }
 
-        private void Browse(TextBox box, bool allowNew)
+        private void Browse(TextBox box)
         {
             using (FolderBrowserDialog dialog = new FolderBrowserDialog())
             {
-                dialog.ShowNewFolderButton = allowNew;
+                dialog.ShowNewFolderButton = false;
                 if (Directory.Exists(box.Text)) dialog.SelectedPath = box.Text;
                 if (dialog.ShowDialog(this) == DialogResult.OK) box.Text = dialog.SelectedPath;
             }
@@ -275,8 +231,7 @@ namespace ProjectEdenUnofficialSetup
         {
             install.Enabled = false;
             progress.Style = ProgressBarStyle.Marquee;
-            worker.RunWorkerAsync(new string[] { source.Text, target.Text,
-                saves.Checked ? "1" : "0" });
+            worker.RunWorkerAsync(source.Text);
         }
     }
 
@@ -285,12 +240,16 @@ namespace ProjectEdenUnofficialSetup
         [STAThread]
         private static int Main(string[] args)
         {
-            if (args.Length >= 3 && args[0] == "--install")
+            if (args.Length > 0)
             {
+                if (args.Length != 2 || args[0] != "--install")
+                {
+                    Console.Error.WriteLine("Usage: ProjectEdenUnofficialSetup.exe --install <GOG game folder>");
+                    return 2;
+                }
                 try
                 {
-                    Installer.Install(args[1], args[2],
-                        Array.IndexOf(args, "--copy-saves") >= 0,
+                    Installer.Install(args[1],
                         delegate(string message) { Console.WriteLine(message); });
                     return 0;
                 }
