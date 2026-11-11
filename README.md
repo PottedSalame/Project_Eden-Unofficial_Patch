@@ -4,6 +4,14 @@ A patch for the GOG Project Eden `Eden.exe` version 1.0.0.2. It creates a
 separate installation; the original game is left unchanged. Game files and
 generated executables are not included in this repository.
 
+## Install
+
+1. Download `ProjectEdenUnofficialSetup.exe` from the [latest release](https://github.com/PottedSalame/Project_Eden-Unofficial_Patch/releases/latest). No Python is needed.
+2. Run setup. Choose the GOG folder containing `Eden.exe` and a separate, empty destination. Optionally copy saved games, then click **Install**.
+3. Launch `Eden.exe` from the destination folder.
+
+To verify the download, compare its SHA-256 with the release's `SHA256SUMS.txt`.
+
 ## Features
 
 - Windowed and borderless modes in **Graphics Settings**, with saved mode,
@@ -27,9 +35,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build-Installer.ps1 `
   -GameDirectory $gameDir
 ```
 
-Run `build/ProjectEdenUnofficialSetup.exe` and choose the GOG game folder and
-an empty destination folder. The installer verifies the original executable,
-copies the game assets, and patches the copy. Copying saved games is optional.
+The installer verifies the original executable, copies the game assets, and
+patches the copy.
 
 The build also writes `build/SHA256SUMS.txt`. Compare its SHA-256 with the
 checksum published alongside the release executable. To verify the release
