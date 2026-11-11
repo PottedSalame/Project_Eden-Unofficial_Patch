@@ -33,4 +33,12 @@ if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
     /reference:System.Windows.Forms.dll /reference:System.Drawing.dll `
     (Join-Path $PSScriptRoot 'installer\Program.cs')
 if ($LASTEXITCODE -ne 0) { throw 'The installer build failed.' }
+& py -3 (Join-Path $PSScriptRoot 'tools\normalize_dotnet_pe.py') $setup
+if ($LASTEXITCODE -ne 0) { throw 'The installer normalization failed.' }
+$hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+$checksum = Join-Path $build 'SHA256SUMS.txt'
+[IO.File]::WriteAllText($checksum, "$hash  ProjectEdenUnofficialSetup.exe`n",
+    [Text.UTF8Encoding]::new($false))
 Write-Output "Installer ready: $setup"
+Write-Output "SHA-256: $hash"
+Write-Output "Checksums: $checksum"

@@ -31,6 +31,12 @@ Run `build/ProjectEdenUnofficialSetup.exe` and choose the GOG game folder and
 an empty destination folder. The installer verifies the original executable,
 copies the game assets, and patches the copy. Copying saved games is optional.
 
+The build also writes `build/SHA256SUMS.txt`. Compare its SHA-256 with the
+checksum published alongside the release executable. To verify the release
+from source, build its tag with the same GOG game, .NET Framework compiler,
+and reference assemblies. The build normalizes the PE timestamp and .NET
+module ID so repeated builds with the same inputs match.
+
 ## Development
 
 `patch.py` verifies the source executable's SHA-256 and exact patch bytes.
