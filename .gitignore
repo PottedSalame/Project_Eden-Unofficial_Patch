@@ -1,0 +1,15 @@
+/test-install/
+/build/
+/Eden.exe
+/d3d8.dll
+/title.edf
+/Images/
+/Levels/
+/Movies/
+/Sounds/
+/SAVED GAMES/
+/ScreenShots/
+/ProjectEdenPatch.ini
+__pycache__/
+*.pyc
+
