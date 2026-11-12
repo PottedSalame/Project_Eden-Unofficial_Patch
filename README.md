@@ -54,3 +54,8 @@ it, install `keystone-engine` and run
 For a separate local test install, run `patch.py` with a `test-install/Eden.exe`
 output, then `prepare-test.ps1 -GameDirectory $gameDir`. Launch the game from
 `test-install/` so its relative asset paths resolve.
+
+## License
+
+The original code in this repository is licensed under [GPL-3.0-only](LICENSE).
+This license does not cover Project Eden or its game assets.
